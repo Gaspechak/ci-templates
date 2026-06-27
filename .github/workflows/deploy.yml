@@ -1,0 +1,59 @@
+name: Deploy - Reusable
+
+on:
+  workflow_call:
+    inputs:
+      target:
+        required: true
+        type: string
+        description: 'haloy deployment target (development or production)'
+    secrets:
+      HALOY_API_TOKEN:
+        required: true
+      GOTENBERG_USERNAME:
+        required: false
+      GOTENBERG_PASSWORD:
+        required: false
+
+concurrency:
+  group: deploy-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    env:
+      HALOY_API_TOKEN: ${{ secrets.HALOY_API_TOKEN }}
+      GOTENBERG_USERNAME: ${{ secrets.GOTENBERG_USERNAME }}
+      GOTENBERG_PASSWORD: ${{ secrets.GOTENBERG_PASSWORD }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      - name: Semantic Release
+        id: semantic
+        if: inputs.target == 'production'
+        uses: cycjimmy/semantic-release-action@v4
+        with:
+          extra_plugins: |
+            @semantic-release/changelog@6
+            @semantic-release/git@10
+            conventional-changelog-conventionalcommits@8
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Set APP_VERSION for Docker label
+        if: inputs.target == 'production'
+        run: |
+          VERSION="${{ steps.semantic.outputs.new_release_version }}"
+          echo "APP_VERSION=${VERSION:-latest}" >> $GITHUB_ENV
+
+      - uses: haloydev/deploy-action@v1
+        with:
+          api-token: ${{ secrets.HALOY_API_TOKEN }}
+          target: ${{ inputs.target }}

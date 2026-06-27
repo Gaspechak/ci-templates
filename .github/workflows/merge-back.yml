@@ -1,0 +1,66 @@
+name: Merge Back - Reusable
+
+on:
+  workflow_call:
+
+concurrency:
+  group: merge-back-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  merge-back:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+      pull-requests: write
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Create PR from main to develop (or auto-merge)
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          git fetch origin develop main
+
+          if git merge-base --is-ancestor origin/main origin/develop; then
+            echo "develop already contains main. Nothing to do."
+            exit 0
+          fi
+
+          PR_NUM=$(gh pr list \
+            --base develop \
+            --head main \
+            --state open \
+            --json number \
+            --jq '.[0].number' 2>/dev/null || echo "")
+
+          if [ -z "$PR_NUM" ]; then
+            PR_URL=$(gh pr create \
+              --base develop \
+              --head main \
+              --title "chore: sync develop with main" \
+              --body "Automated merge-back from main to develop after hotfix/merge." \
+              --label automated)
+            echo "Created PR: $PR_URL"
+            PR_NUM=$(echo "$PR_URL" | grep -oE '[0-9]+$')
+          else
+            echo "PR #$PR_NUM already exists"
+          fi
+
+          for i in $(seq 1 10); do
+            MERGEABLE=$(gh pr view "$PR_NUM" --json mergeable --jq '.mergeable' 2>/dev/null || echo "unknown")
+            [ "$MERGEABLE" != "unknown" ] && break
+            sleep 3
+          done
+
+          if [ "$MERGEABLE" = "MERGEABLE" ]; then
+            echo "No conflicts. Auto-merging."
+            gh pr merge "$PR_NUM" --squash --subject "chore: sync develop with main"
+          elif [ "$MERGEABLE" = "CONFLICTING" ]; then
+            echo "PR #$PR_NUM has conflicts. Resolve manually."
+          else
+            echo "Mergeability unknown. Enabling auto-merge."
+            gh pr merge "$PR_NUM" --auto --squash --subject "chore: sync develop with main" 2>/dev/null || true
+          fi
