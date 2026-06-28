@@ -53,7 +53,12 @@ jobs:
           VERSION="${{ steps.semantic.outputs.new_release_version }}"
           echo "APP_VERSION=${VERSION:-latest}" >> $GITHUB_ENV
 
-      - uses: haloydev/deploy-action@v1
-        with:
-          api-token: ${{ secrets.HALOY_API_TOKEN }}
-          target: ${{ inputs.target }}
+      - name: Install Haloy CLI
+        run: |
+          HALOY_VERSION=$(curl -fsSL https://api.github.com/repos/haloydev/haloy/releases | jq -r '.[0].tag_name')
+          curl -fsSL -o /usr/local/bin/haloy \
+            "https://github.com/haloydev/haloy/releases/download/${HALOY_VERSION}/haloy-linux-amd64"
+          chmod +x /usr/local/bin/haloy
+
+      - name: Deploy ${{ inputs.target }}
+        run: haloy deploy -t ${{ inputs.target }} --no-logs
